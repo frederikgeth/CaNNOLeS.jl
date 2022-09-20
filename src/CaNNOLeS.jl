@@ -350,7 +350,7 @@ function cannoles(
         F!(xt, Ft)
         c!(xt, ct)
       else
-        η, α, ϕx, Dϕ, nbki = line_search(
+        η, α, ϕx, Dϕ, nbki = line_search_backtrack(
           x,
           r,
           λ,
@@ -681,8 +681,109 @@ function line_search(
       error("α too small")
     end
   end
+  @show "hello"
 
   return η, α, ϕx, Dϕ, nbk
+end
+
+function line_search_backtrack(
+  x,
+  r,
+  λ,
+  dx,
+  dr,
+  dλ,
+  Fx,
+  cx,
+  Jx,
+  Jcx,
+  ϕ,
+  xt,
+  rt,
+  λt,
+  Ft,
+  ct,
+  F!,
+  c!,
+  ρ,
+  δ,
+  η,
+  trial_computed,
+  merit,
+  params,
+)
+
+  ρ_hi = 0.5
+  ρ_lo = 0.1
+  T = eltype(x)
+  Dϕ = dot(Jx' * Fx, dx) - dot(dx, Jcx' * (λ - cx / δ))
+
+  if length(λ) > 0
+    η = 1 / δ
+  end
+  @assert Dϕ < 0
+
+  if !trial_computed
+    xt .= x .+ dx
+    F!(xt, Ft)
+    c!(xt, ct)
+  end
+
+  ϕx = ϕ(x, λ, Fx, cx, η)
+  ϕt = ϕ(xt, λ, Ft, ct, η)
+  ϕt_0 = ϕt
+
+  α = one(T)
+  armijo_param = params[:γA]
+  nbk = 0
+ # ϕt => ϕx_1
+ # ϕx => ϕ_0
+ # armijo_param => c_1
+ # Dϕ => dϕ_0
+ # α => α_2, α_1 
+
+ α_1 = α
+ α_2 = α
+
+  while !(ϕt <= ϕx + armijo_param * α_2 * Dϕ)
+    nbk += 1
+      F!(xt, Ft)
+      c!(xt, ct)
+      ϕt = ϕ(xt, λ, Ft, ct, η)
+    if nbk == 1
+      α_tmp = - (Dϕ * α_2^2) / ( 2 * (ϕt - ϕx - Dϕ*α_2) )
+    else
+      div = 1.0 / (α_1^2 * α_2^2 * (α_2 - α_1))
+      a = (α_1^2*(ϕt - ϕx - Dϕ*α_2) - α_2^2*(ϕt_0 - ϕx - Dϕ*α_1))*div
+      b = (-α_1^3*(ϕt - ϕx - Dϕ*α_2) + α_2^3*(ϕt_0 - ϕx - Dϕ*α_1))*div
+
+      if isapprox(a, zero(a), atol=eps(real(1.0)))
+          α_tmp = Dϕ / (2*b)
+      else
+          # discriminant
+          d = max(b^2 - 3*a*Dϕ, 0.0)
+          # quadratic equation root
+          α_tmp = (-b + sqrt(d)) / (3*a)
+      end
+
+      α_1 = α_2
+
+      α_tmp = min(α_tmp, α_2*ρ_hi) # avoid too small reductions
+      α_2 = max(α_tmp, α_2*ρ_lo)
+
+      xt .= x + α_2 * dx
+      F!(xt, Ft)
+      c!(xt, ct)
+
+      ϕt_0, ϕt = ϕt, ϕ(xt, λ, Ft, ct, η)
+    end
+
+    if nbk > 1000
+      error("Linesearch failed to converge, reached maximum iterations $(nbk).")
+  end
+  end
+
+  return η, α_2, ϕx, Dϕ, nbk
 end
 
 end # module
